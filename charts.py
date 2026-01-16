@@ -165,7 +165,7 @@ DETAIL_FIELD_LABELS = {
 
 
 def _build_detail_post_script(div_id: str, fields: Iterable[str]) -> str:  # type: ignore[override]
-    """產生 Plotly 匯出 HTML 的互動腳本，點擊散點顯示交易細節與近似走勢。"""
+    """產生 Plotly 匯出 HTML 的互動腳本，點擊散點僅顯示交易細節。"""
 
     fields = [field for field in fields]
     if not fields:
@@ -173,26 +173,17 @@ def _build_detail_post_script(div_id: str, fields: Iterable[str]) -> str:  # typ
 
     labels = [DETAIL_FIELD_LABELS.get(field, field) for field in fields]
     panel_html = (
-        "<div style=\"display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;\">"
-        "<div style=\"flex:1 1 360px;min-width:320px;border:1px solid #111;"
-        "border-radius:8px;padding:12px;background:#ffffff;box-shadow:0 8px 20px rgba(0,0,0,0.08);\">"
-        "<h4 style=\"margin:0 0 8px;color:#111;\">交易細節</h4>"
-        "<div data-role=\"trade-detail-content\">點擊散點以檢視交易資訊。</div>"
-        "</div>"
-        "<div style=\"flex:1 1 360px;min-width:320px;border:1px solid #111;"
-        "border-radius:8px;padding:12px;background:#ffffff;box-shadow:0 8px 20px rgba(0,0,0,0.08);\">"
-        "<h4 style=\"margin:0 0 8px;color:#111;\">近似走勢</h4>"
-        f"<div id=\"{div_id}-spark\" data-role=\"trade-spark\" style=\"height:240px;\"></div>"
-        "</div>"
-        "</div>"
+        '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;">'
+        '<div style="flex:1 1 360px;min-width:320px;border:1px solid #111;'
+        'border-radius:8px;padding:12px;background:#ffffff;box-shadow:0 8px 20px rgba(0,0,0,0.08);">'
+        '<h4 style="margin:0 0 8px;color:#111;">交易細節</h4>'
+        '<div data-role="trade-detail-content">點擊散點以檢視交易資訊。</div>'
+        '</div>'
+        '</div>'
     )
     panel_json = json.dumps(panel_html, ensure_ascii=True)
     fields_json = json.dumps(fields, ensure_ascii=True)
     labels_json = json.dumps(labels, ensure_ascii=True)
-    time_label = json.dumps("時間", ensure_ascii=True)
-    price_label = json.dumps("相對價格 (%)", ensure_ascii=True)
-    node_label = json.dumps("節點", ensure_ascii=True)
-    value_label = json.dumps("值", ensure_ascii=True)
 
     script_lines = [
         f"const plot=document.getElementById('{div_id}');",
@@ -203,8 +194,7 @@ def _build_detail_post_script(div_id: str, fields: Iterable[str]) -> str:  # typ
         f"panel.innerHTML={panel_json};",
         "const parent=plot.parentNode;if(parent){parent.insertBefore(panel,plot.nextSibling);}",
         "}",
-        "const content=panel.querySelector('[data-role=\\\"trade-detail-content\\\"]');",
-        "const spark=panel.querySelector('[data-role=\\\"trade-spark\\\"]');",
+        "const content=panel.querySelector('[data-role=\"trade-detail-content\"]');",
         "if(!content)return;",
         f"const fields={fields_json};",
         f"const labels={labels_json};",
@@ -215,122 +205,18 @@ def _build_detail_post_script(div_id: str, fields: Iterable[str]) -> str:  # typ
         "  }",
         "  return String(val);",
         "}",
-        "function fieldIndex(name){return fields.indexOf(name);}",
-        "function buildSpark(data){",
-        "  if(!spark||!window.Plotly)return;",
-        "  const mae=Math.max(0,Number(data[fieldIndex('mae_abs_pct')])||0)/100;",
-        "  const gmfe=Math.max(0,Number(data[fieldIndex('mfe_pct')])||0)/100;",
-        "  const bmfe=Math.max(0,Number(data[fieldIndex('bmfe_pct')])||0)/100;",
-        "  const retPct=(Number(data[fieldIndex('return_pct')])||0)/100;",
-        "  const parseTime=(name)=>{const idx=fieldIndex(name);if(idx<0)return NaN;const raw=data[idx];const v=raw instanceof Date?raw.valueOf():Date.parse(raw);return Number.isFinite(v)?v:NaN;};",
-        "  const tEntryMs=parseTime('entry_time');",
-        "  const tExitMs=parseTime('exit_time');",
-        "  const tMaeMs=parseTime('mae_time');",
-        "  const tGmfeMs=parseTime('gmfe_time');",
-        "  const tBmfeMs=parseTime('bmfe_time');",
-        "  const hasRange=Number.isFinite(tEntryMs)&&Number.isFinite(tExitMs)&&tExitMs>tEntryMs;",
-        "  const duration=hasRange?(tExitMs-tEntryMs):null;",
-        "  const pct=100;",
-        "  const basePts=[",
-        "    {label:'Entry',value:100,timeMs:tEntryMs,scale:0,order:0},",
-        "    {label:'BMFE',value:100+(bmfe*pct),timeMs:tBmfeMs,scale:0.25,order:1},",
-        "    {label:'MAE',value:100-(mae*pct),timeMs:tMaeMs,scale:0.45,order:2},",
-        "    {label:'GMFE',value:100+(gmfe*pct),timeMs:tGmfeMs,scale:0.7,order:3},",
-        "    {label:'Exit',value:(1+retPct)*pct,timeMs:tExitMs,scale:1,order:4},",
-        "  ];",
-        "  const mergedByCoord=[];",
-        "  basePts.forEach((pt)=>{",
-        "    const curTime=Number.isFinite(pt.timeMs)?pt.timeMs:null;",
-        "    const found=mergedByCoord.find((item)=>{",
-        "      const otherTime=Number.isFinite(item.timeMs)?item.timeMs:null;",
-        "      const sameTime=(curTime===null&&otherTime===null)||(curTime!==null&&otherTime!==null&&Math.abs(curTime-otherTime)<=1);",
-        "      const sameValue=Math.abs((pt.value||0)-(item.value||0))<=1e-6;",
-        "      return sameTime&&sameValue;",
-        "    });",
-        "    if(found){",
-        "      found.label=found.label.includes(pt.label)?found.label:`${found.label}/${pt.label}`;",
-        "    }else{",
-        "      mergedByCoord.push({...pt});",
-        "    }",
-        "  });",
-        "  const resolveX=(pt)=>{",
-        "    if(Number.isFinite(pt.timeMs))return new Date(pt.timeMs);",
-        "    if(hasRange&&duration!==null)return new Date(tEntryMs+duration*pt.scale);",
-        "    return pt.order;",
-        "  };",
-        "  const pts=mergedByCoord.map(pt=>({...pt,x:resolveX(pt),y:pt.value}));",
-        "  pts.sort((a,b)=>{",
-        "    const ax=a.x instanceof Date?a.x.valueOf():a.x;const bx=b.x instanceof Date?b.x.valueOf():b.x;",
-        "    if(ax===bx)return (a.order??0)-(b.order??0);",
-        "    return ax-bx;",
-        "  });",
-        "  const merged=[];",
-        "  for(const pt of pts){",
-        "    const xv=pt.x instanceof Date?pt.x.valueOf():pt.x;",
-        "    const key=`${xv}:${pt.y}`;",
-        "    const found=merged.find(p=>p.key===key);",
-        "    if(found){found.labels.push(pt.label);continue;}",
-        "    merged.push({...pt,key,labels:[pt.label]});",
-        "  }",
-        "  const expandPoints=(items)=>{",
-        "    const expanded=[];",
-        "    items.forEach((pt)=>{",
-        "      const labels=pt.labels&&pt.labels.length?pt.labels:[pt.label];",
-        "      const count=labels.length||1;",
-        "      const half=(count-1)/2;",
-        "      labels.forEach((label,idx)=>{",
-        "        let xVal=pt.x;",
-        "        let yVal=pt.y??100;",
-        "        if(count>1){",
-        "          const shift=idx-half;",
-        "          if(pt.x instanceof Date){",
-        "            const base=pt.x.valueOf();",
-        "            const baseDuration=duration||24*3600*1000;",
-        "            const spacing=Math.max(baseDuration*0.01,3600*1000);",
-        "            xVal=new Date(base+shift*spacing);",
-        "          }else{",
-        "            const base=typeof pt.x==='number'?pt.x:Number(pt.x)||0;",
-        "            xVal=base+shift*0.1;",
-        "          }",
-        "          yVal+=shift*4;",
-        "        }",
-        "        expanded.push({...pt,x:xVal,y:yVal,labels:[label],text:label});",
-        "      });",
-        "    });",
-        "    return expanded;",
-        "  };",
-        "  const adjustedPoints=expandPoints(merged);",
-        "  const texts=adjustedPoints.map(p=>p.labels.join('/'));",
-        "  const useDateAxis=adjustedPoints.every(p=>p.x instanceof Date);",
-        "  const tickvals=useDateAxis?undefined:adjustedPoints.map(p=>p.x);",
-        "  const ticktext=useDateAxis?undefined:texts;",
-        "  const ys=adjustedPoints.map(p=>p.y);",
-        "  const offsets=ys.map(v=>v-100);",
-        "  const maxAbs=Math.max(...offsets.map(v=>Math.abs(v)));",
-        "  const span=Math.max(5,maxAbs||5);",
-        "  const yMin=100-span;",
-        "  const yMax=100+span;",
-        "  const layout={margin:{t:24,r:12,b:28,l:52},height:240,xaxis:{title:"+time_label+",type:useDateAxis?'date':'linear',",
-        "    tickvals:tickvals,ticktext:ticktext},",
-        "    yaxis:{title:"+price_label+",range:[yMin,yMax],tickformat:',.0f'},paper_bgcolor:'#fff',plot_bgcolor:'#fff'};",
-        "  const trace={type:'scatter',mode:'lines+markers+text',x:adjustedPoints.map(p=>p.x),y:adjustedPoints.map(p=>p.y),text:texts,",
-        "    textposition:'top center',line:{color:'#2563eb',width:2},marker:{size:8,color:'#2563eb',line:{width:1,color:'#111'}},",
-        "    hovertemplate:`"+node_label+": %{text}<br>"+value_label+": %{y:.1f}%<extra></extra>`};",
-        "  window.Plotly.react(spark,[trace],layout,{displayModeBar:false});",
-        "}",
         "plot.on('plotly_click',function(ev){",
         "  const pt=ev&&ev.points&&ev.points[0];if(!pt||!pt.customdata)return;",
-        "  const data=pt.customdata;let html='<table style=\\\"width:100%;border-collapse:collapse;\\\">';",
+        "  const data=pt.customdata;let html='<table style=\"width:100%;border-collapse:collapse;\">';",
         "  for(let i=0;i<fields.length;i++){const lbl=labels[i]||fields[i];",
-        "    html+=`<tr><th style=\\\"text-align:left;padding:4px 8px;border-bottom:1px solid #eee;\\\">${lbl}</th>`+",
-        "    `<td style=\\\"padding:4px 8px;border-bottom:1px solid #eee;\\\">${formatVal(data[i])}</td></tr>`;",
+        "    html+=`<tr><th style=\"text-align:left;padding:4px 8px;border-bottom:1px solid #eee;\">${lbl}</th>`+",
+        "    `<td style=\"padding:4px 8px;border-bottom:1px solid #eee;\">${formatVal(data[i])}</td></tr>`;",
         "  }",
-        "  html+='</table>';content.innerHTML=html;buildSpark(data);",
+        "  html+='</table>';content.innerHTML=html;",
         "});",
     ]
     script_body = "".join(script_lines)
     return "(function(){try{" + script_body + "}catch(e){console.warn('detail script error',e);}})();"
-
 
 def _get_closed_trades(df: pd.DataFrame) -> pd.DataFrame:
     """取出已平倉交易，若無狀態欄位則直接回傳副本。"""

@@ -6,10 +6,17 @@
 - Produces up to 10 Plotly charts: return distribution, edge ratio by holding time, MAE vs return, MAE vs MFE, MAE vs BMFE, MDD vs GMFE, MAE distribution, BMFE distribution, GMFE distribution, and key-metric violin plots.
 
 ## Quick start
-1) Python 3.10+. Install dependencies (from repo root): `pip install -r ../requirements.txt plotly`
+1) Python 3.10+. Install dependencies:
+   - From the project root (`mae_tool/`): `pip install -r requirements.txt`
+   - Or from the parent directory (one level above `mae_tool/`): `pip install -r mae_tool/requirements.txt`
 2) Convert a backtest JSON:
    ```bash
+   # Run as a module from the parent directory of mae_tool
    python -m mae_tool.main --input path/to/backtest.json --strategy MyStrategy \
+     --output mae_tool_output/demo_run --charts 1,2,3,4,5,6,7,8,9,10 \
+     --report-title "MAE & MFE JSON Report"
+   # If you're already inside mae_tool/, run the script directly
+   python main.py --input path/to/backtest.json --strategy MyStrategy \
      --output mae_tool_output/demo_run --charts 1,2,3,4,5,6,7,8,9,10 \
      --report-title "MAE & MFE JSON Report"
    ```
@@ -35,10 +42,17 @@
 - 預設可產出 10 張 Plotly 圖：報酬分佈、持有時間對應 Edge Ratio、MAE vs Return、MAE vs MFE、MAE vs BMFE、MDD vs GMFE、MAE 分佈、BMFE 分佈、GMFE 分佈、核心指標小提琴圖。
 
 ## 使用步驟
-1) 安裝環境（建議在專案根目錄）：`pip install -r ../requirements.txt plotly`
+1) 安裝環境：
+   - 專案根目錄 `mae_tool/`：`pip install -r requirements.txt`
+   - 在父層目錄（上一層）也可：`pip install -r mae_tool/requirements.txt`
 2) 執行轉換：
    ```bash
+   # 從父層目錄以模組方式執行
    python -m mae_tool.main --input path/to/backtest.json --strategy MyStrategy \
+     --output mae_tool_output/demo_run --charts 1,2,3,4,5,6,7,8,9,10 \
+     --report-title "MAE & MFE JSON Report"
+   # 若已 cd 到 mae_tool/ 目錄，則可直接跑腳本
+   python main.py --input path/to/backtest.json --strategy MyStrategy \
      --output mae_tool_output/demo_run --charts 1,2,3,4,5,6,7,8,9,10 \
      --report-title "MAE & MFE JSON Report"
    ```

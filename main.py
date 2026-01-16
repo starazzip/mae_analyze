@@ -10,13 +10,14 @@ from typing import Iterable, Tuple
 # 允許以腳本方式直接執行：若未以套件啟動，將父層加入 sys.path 並使用絕對匯入
 import sys
 
+# 兼容不同資料夾名稱（例如 mae_tool 或 mae_analyze），改用相對匯入避免根目錄名稱限制
 if __package__ is None or __package__ == "":
     pkg_root = Path(__file__).resolve().parent
     sys.path.append(str(pkg_root.parent))
     __package__ = pkg_root.name
 
-from mae_tool.models import AnalysisOptions  # type: ignore
-from mae_tool.runner import run_mae_mfe_from_json  # type: ignore
+from .models import AnalysisOptions
+from .runner import run_mae_mfe_from_json
 
 
 def _parse_charts(raw: str | None) -> Tuple[int, ...]:

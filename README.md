@@ -1,4 +1,4 @@
-# MAE/MFE JSON Analyzer (mae_tool)
+# MAE/MFE JSON Analyzer (mae_tool / mae_analyze)
 
 ## What this project does
 - CLI helper that converts a Freqtrade-like backtest JSON into MAE/MFE visuals and an optional HTML summary report.
@@ -7,15 +7,20 @@
 
 ## Quick start
 1) Python 3.10+. Install dependencies:
-   - From the project root (`mae_tool/`): `pip install -r requirements.txt`
-   - Or from the parent directory (one level above `mae_tool/`): `pip install -r mae_tool/requirements.txt`
+   - From the project root (e.g., `mae_analyze/` or `mae_tool/`): `pip install -r requirements.txt`
+   - Or from the parent directory: `pip install -r mae_analyze/requirements.txt` (adjust the folder name if yours is `mae_tool/`)
 2) Convert a backtest JSON:
    ```bash
-   # Run as a module from the parent directory of mae_tool
+   # Run as a module from the parent directory, matching your folder name
+   # If the folder is mae_analyze/:
+   python -m mae_analyze.main --input path/to/backtest.json --strategy MyStrategy \
+     --output mae_tool_output/demo_run --charts 1,2,3,4,5,6,7,8,9,10 \
+     --report-title "MAE & MFE JSON Report"
+   # If the folder is mae_tool/:
    python -m mae_tool.main --input path/to/backtest.json --strategy MyStrategy \
      --output mae_tool_output/demo_run --charts 1,2,3,4,5,6,7,8,9,10 \
      --report-title "MAE & MFE JSON Report"
-   # If you're already inside mae_tool/, run the script directly
+   # Or, after cd into the folder, run the script directly (name-agnostic)
    python main.py --input path/to/backtest.json --strategy MyStrategy \
      --output mae_tool_output/demo_run --charts 1,2,3,4,5,6,7,8,9,10 \
      --report-title "MAE & MFE JSON Report"
@@ -43,15 +48,20 @@
 
 ## 使用步驟
 1) 安裝環境：
-   - 專案根目錄 `mae_tool/`：`pip install -r requirements.txt`
-   - 在父層目錄（上一層）也可：`pip install -r mae_tool/requirements.txt`
+   - 專案根目錄（如 `mae_analyze/` 或 `mae_tool/`）：`pip install -r requirements.txt`
+   - 在父層目錄也可：`pip install -r mae_analyze/requirements.txt`（若資料夾名是 `mae_tool/` 請相應調整）
 2) 執行轉換：
    ```bash
-   # 從父層目錄以模組方式執行
+   # 從父層目錄以模組方式執行，資料夾名稱請配合實際情況
+   # 若資料夾名為 mae_analyze/：
+   python -m mae_analyze.main --input path/to/backtest.json --strategy MyStrategy \
+     --output mae_tool_output/demo_run --charts 1,2,3,4,5,6,7,8,9,10 \
+     --report-title "MAE & MFE JSON Report"
+   # 若資料夾名為 mae_tool/：
    python -m mae_tool.main --input path/to/backtest.json --strategy MyStrategy \
      --output mae_tool_output/demo_run --charts 1,2,3,4,5,6,7,8,9,10 \
      --report-title "MAE & MFE JSON Report"
-   # 若已 cd 到 mae_tool/ 目錄，則可直接跑腳本
+   # 若已 cd 到該資料夾，可直接跑腳本（不依賴資料夾名稱）
    python main.py --input path/to/backtest.json --strategy MyStrategy \
      --output mae_tool_output/demo_run --charts 1,2,3,4,5,6,7,8,9,10 \
      --report-title "MAE & MFE JSON Report"

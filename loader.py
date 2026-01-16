@@ -55,6 +55,30 @@ def _safe_float(value: object) -> Optional[float]:
     return float(num)
 
 
+def _price_from_orders(trade: Dict[str, object], *, is_entry: bool) -> Optional[float]:
+    """從 orders 取出入口/出口的 safe_price 並加權平均，避免 open_rate/close_rate 為 0。"""
+
+    orders = trade.get("orders")
+    if not isinstance(orders, list) or not orders:
+        return None
+
+    total_cost = 0.0
+    total_amount = 0.0
+    for order in orders:
+        if bool(order.get("ft_is_entry")) != is_entry:
+            continue
+        price = _safe_float(order.get("safe_price"))
+        amount = _safe_float(order.get("amount"))
+        if price is None or amount is None:
+            continue
+        total_cost += price * amount
+        total_amount += amount
+
+    if total_amount <= 0:
+        return None
+    return total_cost / total_amount
+
+
 def _compute_pct(numerator: Optional[float], denominator: Optional[float], inverse: bool = False) -> Optional[float]:
     """計算百分比，inverse=True 代表使用 (denominator - numerator)/denominator。"""
 
@@ -101,8 +125,8 @@ def load_trades_json(
 
     for idx, trade in enumerate(trades_raw):
         is_short = bool(trade.get("is_short"))
-        entry_price = _safe_float(trade.get("open_rate"))
-        exit_price = _safe_float(trade.get("close_rate"))
+        entry_price = _price_from_orders(trade, is_entry=True) or _safe_float(trade.get("open_rate"))
+        exit_price = _price_from_orders(trade, is_entry=False) or _safe_float(trade.get("close_rate"))
         min_rate = _safe_float(trade.get("min_rate"))
         max_rate = _safe_float(trade.get("max_rate"))
         fee_open = _safe_float(trade.get("fee_open")) or 0.0
@@ -222,9 +246,9 @@ def load_trades_json(
     # 警示整理
     chart_impacts: Dict[str, str] = {}
     if missing_mae_fields:
-        chart_impacts["mae"] = "缺少 min_rate 或 open_rate，可能無法產生圖 3/4/5/6/7/10"
+        chart_impacts["mae"] = "缺少 min_rate 或 safe_price/open_rate，可能無法產生圖 3/4/5/6/7/10"
     if missing_mfe_fields:
-        chart_impacts["mfe"] = "缺少 max_rate 或 open_rate，可能無法產生圖 4/5/6/8/9/10"
+        chart_impacts["mfe"] = "缺少 max_rate 或 safe_price/open_rate，可能無法產生圖 4/5/6/8/9/10"
     if approximated_mdd:
         warn_list.append("mdd_pct 以 MAE 近似，序列時序未提供。")
     if fee_missing:

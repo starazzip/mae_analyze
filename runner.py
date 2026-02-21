@@ -60,7 +60,12 @@ class MAEMFEJsonAnalyzer:
         self._emit_progress("載入 JSON", 0.05)
         warnings: List[str] = []
         trades_df, strategy_used = load_trades_json(
-            self.json_path, strategy_name=self.options.strategy_name, warnings=warnings
+            self.json_path,
+            strategy_name=self.options.strategy_name,
+            warnings=warnings,
+            data_dir=self.options.data_dir,
+            ohlcv_format=self.options.ohlcv_format,
+            rebuild_excursions_from_ohlcv=self.options.rebuild_excursions_from_ohlcv,
         )
         edge_records = _compute_edge_ratio_records(trades_df, EDGE_RATIO_TIME_BUCKETS_DAYS)
         edge_df = pd.DataFrame(edge_records)

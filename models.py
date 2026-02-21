@@ -20,6 +20,9 @@ class AnalysisOptions:
     chart_kwargs: Dict[str, object] = field(default_factory=dict)
     report_title: str = "MAE & MFE JSON Report"
     strategy_name: Optional[str] = None
+    data_dir: Optional[str] = None
+    ohlcv_format: str = "feather"
+    rebuild_excursions_from_ohlcv: bool = True
 
     def is_chart_enabled(self, chart_index: int) -> bool:
         return chart_index in self.charts

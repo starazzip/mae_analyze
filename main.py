@@ -51,6 +51,13 @@ def main(argv: Iterable[str] | None = None) -> None:
     parser.add_argument("--report-title", default="MAE & MFE JSON Report", help="報告標題")
     parser.add_argument("--no-report", action="store_true", help="僅輸出圖表，不產生總表 HTML")
     parser.add_argument("--no-html", action="store_true", help="不輸出互動 HTML（預設輸出）")
+    parser.add_argument("--data-dir", help="OHLCV 資料目錄；未指定則依 trading_mode 推估 user_data/data/spot 或 futures")
+    parser.add_argument("--ohlcv-format", default="feather", help="OHLCV 檔案格式，預設 feather")
+    parser.add_argument(
+        "--no-rebuild-excursions",
+        action="store_true",
+        help="停用 min/max 缺值時的 OHLCV 重建（預設啟用）",
+    )
 
     args = parser.parse_args(list(argv) if argv is not None else None)
 
@@ -63,6 +70,9 @@ def main(argv: Iterable[str] | None = None) -> None:
         export_report=not args.no_report,
         report_title=args.report_title,
         strategy_name=args.strategy,
+        data_dir=args.data_dir,
+        ohlcv_format=args.ohlcv_format,
+        rebuild_excursions_from_ohlcv=not args.no_rebuild_excursions,
     )
 
     result = run_mae_mfe_from_json(args.input, output_dir, options=options)

@@ -109,28 +109,83 @@ def build_chart_2_edge_ratio(ctx: ChartContext) -> Optional[PlotArtifact]:
     if df.empty:
         return None
     working = df.copy()
-    if "time_scale" not in working or "edge_ratio" not in working:
+    if "edge_ratio" not in working:
         return None
     working["edge_ratio"] = pd.to_numeric(working["edge_ratio"], errors="coerce")
-    working = working.dropna(subset=["edge_ratio"])
+    for col in ("bucket_start_days", "bucket_end_days", "bucket_mid_days"):
+        if col in working:
+            working[col] = pd.to_numeric(working[col], errors="coerce")
+    if "bucket_mid_days" not in working and {"bucket_start_days", "bucket_end_days"}.issubset(working.columns):
+        working["bucket_mid_days"] = (working["bucket_start_days"] + working["bucket_end_days"]) / 2.0
+    if "bucket_mid_days" not in working:
+        # 相容舊資料：若無數值欄位則退回分類軸。
+        if "time_scale" not in working:
+            return None
+        working = working.dropna(subset=["edge_ratio"])
+        if working.empty:
+            return None
+        fig = go.Figure()
+        fig.add_trace(
+            go.Scatter(
+                x=working["time_scale"],
+                y=working["edge_ratio"],
+                mode="lines+markers",
+                line=dict(color="#9467bd"),
+                marker=dict(size=8),
+                name="Edge Ratio",
+            )
+        )
+        fig.add_hline(y=1.0, line_dash="dot", line_color="#999999", annotation_text="Edge = 1")
+        fig.update_layout(
+            title="Edge Ratio vs Time",
+            xaxis_title="Time Scale",
+            yaxis_title="Edge Ratio (GMFE / MAE)",
+        )
+        return _export_plotly_figure(fig, "chart02_edge_ratio", "Edge Ratio vs Time", ctx)
+
+    working = working.dropna(subset=["bucket_mid_days", "edge_ratio"])
     if working.empty:
         return None
+
+    if "time_scale" not in working:
+        working["time_scale"] = working["bucket_mid_days"].map(lambda x: f"{x:.2f}D")
+    if "sample_size" in working:
+        working["sample_size"] = pd.to_numeric(working["sample_size"], errors="coerce").fillna(0).astype(int)
+    else:
+        working["sample_size"] = 0
+
+    customdata = np.column_stack(
+        [
+            working["time_scale"].astype(str).to_numpy(),
+            working["sample_size"].to_numpy(),
+            working["bucket_start_days"].fillna(working["bucket_mid_days"]).to_numpy(),
+            working["bucket_end_days"].fillna(working["bucket_mid_days"]).to_numpy(),
+        ]
+    )
 
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
-            x=working["time_scale"],
+            x=working["bucket_mid_days"],
             y=working["edge_ratio"],
             mode="lines+markers",
             line=dict(color="#9467bd"),
             marker=dict(size=8),
             name="Edge Ratio",
+            customdata=customdata,
+            hovertemplate=(
+                "區間: %{customdata[0]}<br>"
+                "中點: %{x:.3f} 天<br>"
+                "Edge Ratio: %{y:.3f}<br>"
+                "樣本數: %{customdata[1]}<extra></extra>"
+            ),
         )
     )
     fig.add_hline(y=1.0, line_dash="dot", line_color="#999999", annotation_text="Edge = 1")
     fig.update_layout(
         title="Edge Ratio vs Time",
-        xaxis_title="Time Scale",
+        xaxis_title="Holding Time (days)",
+        xaxis=dict(type="linear"),
         yaxis_title="Edge Ratio (GMFE / MAE)",
     )
     return _export_plotly_figure(fig, "chart02_edge_ratio", "Edge Ratio vs Time", ctx)

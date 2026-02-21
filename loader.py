@@ -98,6 +98,74 @@ def _compute_pct(numerator: Optional[float], denominator: Optional[float], inver
     return (numerator - denominator) / denominator * 100.0
 
 
+def _normalize_excursion(mae_pct: Optional[float], mfe_pct: Optional[float]) -> Tuple[Optional[float], Optional[float]]:
+    """將 MAE/MFE 正規化到語義範圍：MAE <= 0、MFE >= 0。"""
+
+    norm_mae = None if mae_pct is None else min(float(mae_pct), 0.0)
+    norm_mfe = None if mfe_pct is None else max(float(mfe_pct), 0.0)
+    return norm_mae, norm_mfe
+
+
+def _normalize_bmfe(bmfe_pct: Optional[float]) -> Optional[float]:
+    """BMFE 為「有利幅度」，應不小於 0。"""
+
+    if bmfe_pct is None:
+        return None
+    return max(float(bmfe_pct), 0.0)
+
+
+def _normalize_mdd(mdd_pct: Optional[float]) -> Optional[float]:
+    """MDD 為回撤，應不大於 0。"""
+
+    if mdd_pct is None:
+        return None
+    return min(float(mdd_pct), 0.0)
+
+
+def _to_utc(value: pd.Timestamp) -> pd.Timestamp:
+    """將 Timestamp 正規化為 UTC 時區。"""
+
+    if value.tzinfo is None:
+        return value.tz_localize("UTC")
+    return value.tz_convert("UTC")
+
+
+def _compute_mdd_from_ohlcv(window_df: pd.DataFrame, entry_price: float, is_short: bool) -> Optional[float]:
+    """由 OHLCV 路徑計算單筆交易 MDD（百分比，負值）。"""
+
+    if window_df.empty or entry_price <= 0:
+        return None
+
+    if is_short:
+        running_trough = float(entry_price)
+        worst_dd = 0.0
+        for _, row in window_df.sort_index().iterrows():
+            low = _safe_float(row.get("low"))
+            high = _safe_float(row.get("high"))
+            # 保守估計：同一根 K 內先更新有利極值，再檢查不利極值。
+            if low is not None and low > 0:
+                running_trough = min(running_trough, float(low))
+            if high is None or high <= 0 or running_trough <= 0:
+                continue
+            dd = (running_trough - float(high)) / running_trough * 100.0
+            worst_dd = min(worst_dd, dd)
+        return _normalize_mdd(worst_dd)
+
+    running_peak = float(entry_price)
+    worst_dd = 0.0
+    for _, row in window_df.sort_index().iterrows():
+        high = _safe_float(row.get("high"))
+        low = _safe_float(row.get("low"))
+        # 保守估計：同一根 K 內先更新有利極值，再檢查不利極值。
+        if high is not None and high > 0:
+            running_peak = max(running_peak, float(high))
+        if low is None or low <= 0 or running_peak <= 0:
+            continue
+        dd = (float(low) - running_peak) / running_peak * 100.0
+        worst_dd = min(worst_dd, dd)
+    return _normalize_mdd(worst_dd)
+
+
 def _valid_rate(value: object) -> Optional[float]:
     """僅接受大於 0 的價格，將 0 視為缺值（部分回測輸出會以 0 代表缺漏）。"""
 
@@ -212,10 +280,15 @@ class _OHLCVLookup:
             self._df_cache[token] = None
             self._missing_pairs.add(str(pair))
             return None
-        df = raw_df[["date", "low", "high"]].copy()
+        keep_cols = ["date", "low", "high"]
+        if "close" in raw_df.columns:
+            keep_cols.append("close")
+        df = raw_df[keep_cols].copy()
         df["date"] = pd.to_datetime(df["date"], errors="coerce", utc=True)
         df["low"] = pd.to_numeric(df["low"], errors="coerce")
         df["high"] = pd.to_numeric(df["high"], errors="coerce")
+        if "close" in df.columns:
+            df["close"] = pd.to_numeric(df["close"], errors="coerce")
         df = df.dropna(subset=["date"]).sort_values("date")
         if df.empty:
             self._df_cache[token] = None
@@ -225,23 +298,25 @@ class _OHLCVLookup:
         self._df_cache[token] = df
         return df
 
-    def window_extremes(
+    def window_frame(
         self,
         pair: str,
         start_ts: Optional[pd.Timestamp],
         end_ts: Optional[pd.Timestamp],
-    ) -> Tuple[Optional[float], Optional[float]]:
+    ) -> Optional[pd.DataFrame]:
+        """取得交易區間對應的 K 線視窗（以 UTC 索引）。"""
+
         if start_ts is None:
-            return None, None
+            return None
         df = self._load_pair_df(pair)
         if df is None or df.empty:
-            return None, None
+            return None
 
-        start = start_ts.tz_convert("UTC") if start_ts.tzinfo is not None else start_ts.tz_localize("UTC")
+        start = _to_utc(start_ts)
         if end_ts is None:
             end = start
         else:
-            end = end_ts.tz_convert("UTC") if end_ts.tzinfo is not None else end_ts.tz_localize("UTC")
+            end = _to_utc(end_ts)
         if end < start:
             start, end = end, start
 
@@ -249,6 +324,18 @@ class _OHLCVLookup:
         if window.empty:
             window = df.loc[(df.index >= start - self._window_pad) & (df.index <= end + self._window_pad)]
         if window.empty:
+            return None
+
+        return window
+
+    def window_extremes(
+        self,
+        pair: str,
+        start_ts: Optional[pd.Timestamp],
+        end_ts: Optional[pd.Timestamp],
+    ) -> Tuple[Optional[float], Optional[float]]:
+        window = self.window_frame(pair=pair, start_ts=start_ts, end_ts=end_ts)
+        if window is None or window.empty:
             return None, None
 
         low_series = pd.to_numeric(window["low"], errors="coerce")
@@ -346,12 +433,21 @@ def load_trades_json(
         entry_time = _to_utc_timestamp(trade.get("open_date"))
         exit_time = _to_utc_timestamp(trade.get("close_date")) if status == "closed" else None
 
-        if (min_rate is None or max_rate is None) and ohlcv_lookup is not None:
-            low_val, high_val = ohlcv_lookup.window_extremes(
+        window_df: Optional[pd.DataFrame] = None
+        if ohlcv_lookup is not None and entry_time is not None:
+            window_df = ohlcv_lookup.window_frame(
                 pair=pair,
                 start_ts=entry_time,
                 end_ts=exit_time if exit_time is not None else entry_time,
             )
+
+        if (min_rate is None or max_rate is None) and window_df is not None and not window_df.empty:
+            low_series = pd.to_numeric(window_df["low"], errors="coerce")
+            high_series = pd.to_numeric(window_df["high"], errors="coerce")
+            low_series = low_series[(~low_series.isna()) & (low_series > 0)]
+            high_series = high_series[(~high_series.isna()) & (high_series > 0)]
+            low_val = float(low_series.min()) if not low_series.empty else None
+            high_val = float(high_series.max()) if not high_series.empty else None
             if min_rate is None and low_val is not None:
                 min_rate = low_val
                 min_source = "ohlcv_rebuild"
@@ -386,20 +482,118 @@ def load_trades_json(
         else:
             return_pct = None
 
+        mae_time = None
+        gmfe_time = None
+        bmfe_time = None
+        mae_source = "missing"
+        mfe_source = "missing"
+        mae_pct = None
+        mfe_pct = None
+        bmfe_pct = None
+        mdd_pct = None
+
         if entry_price is None:
             missing_mae_fields = missing_mfe_fields = True
-            mae_pct = mfe_pct = None
         else:
-            if is_short:
-                mae_pct = _compute_pct(max_rate, entry_price, inverse=True)
-                mfe_pct = _compute_pct(min_rate, entry_price, inverse=True)
-                mae_source = max_source
-                mfe_source = min_source
-            else:
-                mae_pct = _compute_pct(min_rate, entry_price, inverse=False)
-                mfe_pct = _compute_pct(max_rate, entry_price, inverse=False)
-                mae_source = min_source
-                mfe_source = max_source
+            path_mae_pct = None
+            path_mfe_pct = None
+            # 優先使用交易區間 K 線計算：可取得 MAE/GMFE/BMFE 時點與真實 MDD。
+            if window_df is not None and not window_df.empty:
+                low_series = pd.to_numeric(window_df["low"], errors="coerce")
+                high_series = pd.to_numeric(window_df["high"], errors="coerce")
+                low_series = low_series[(~low_series.isna()) & (low_series > 0)]
+                high_series = high_series[(~high_series.isna()) & (high_series > 0)]
+
+                if is_short:
+                    mae_price = float(high_series.max()) if not high_series.empty else None
+                    gmfe_price = float(low_series.min()) if not low_series.empty else None
+                    mae_time = high_series.idxmax() if not high_series.empty else None
+                    gmfe_time = low_series.idxmin() if not low_series.empty else None
+                    path_mae = _compute_pct(mae_price, entry_price, inverse=True)
+                    path_gmfe = _compute_pct(gmfe_price, entry_price, inverse=True)
+                else:
+                    mae_price = float(low_series.min()) if not low_series.empty else None
+                    gmfe_price = float(high_series.max()) if not high_series.empty else None
+                    mae_time = low_series.idxmin() if not low_series.empty else None
+                    gmfe_time = high_series.idxmax() if not high_series.empty else None
+                    path_mae = _compute_pct(mae_price, entry_price, inverse=False)
+                    path_gmfe = _compute_pct(gmfe_price, entry_price, inverse=False)
+
+                path_mae_pct, path_mfe_pct = _normalize_excursion(path_mae, path_gmfe)
+
+                # BMFE：MAE 發生前的最大有利幅度（before MAE）。
+                if mae_time is not None:
+                    pre_window = window_df.loc[window_df.index < _to_utc(mae_time)]
+                    if pre_window.empty:
+                        bmfe_pct = 0.0
+                        bmfe_time = entry_time
+                    else:
+                        if is_short:
+                            pre_fav = pd.to_numeric(pre_window["low"], errors="coerce")
+                            pre_fav = pre_fav[(~pre_fav.isna()) & (pre_fav > 0)]
+                            if not pre_fav.empty:
+                                bmfe_price = float(pre_fav.min())
+                                bmfe_time = pre_fav.idxmin()
+                                bmfe_pct = _compute_pct(bmfe_price, entry_price, inverse=True)
+                        else:
+                            pre_fav = pd.to_numeric(pre_window["high"], errors="coerce")
+                            pre_fav = pre_fav[(~pre_fav.isna()) & (pre_fav > 0)]
+                            if not pre_fav.empty:
+                                bmfe_price = float(pre_fav.max())
+                                bmfe_time = pre_fav.idxmax()
+                                bmfe_pct = _compute_pct(bmfe_price, entry_price, inverse=False)
+
+                # BMFE 可能與 GMFE 相同：當 GMFE 不晚於 MAE 時允許兩者相等。
+                if (
+                    bmfe_pct is None
+                    and mfe_pct is not None
+                    and gmfe_time is not None
+                    and mae_time is not None
+                    and _to_utc(gmfe_time) <= _to_utc(mae_time)
+                ):
+                    bmfe_pct = mfe_pct
+                    bmfe_time = gmfe_time
+                bmfe_pct = _normalize_bmfe(bmfe_pct)
+
+                mdd_pct = _compute_mdd_from_ohlcv(window_df, entry_price=entry_price, is_short=is_short)
+
+            # 若無法由 K 線完整取得，回退到交易 JSON 極值欄位。
+            if mae_pct is None:
+                if is_short:
+                    mae_pct = _compute_pct(max_rate, entry_price, inverse=True)
+                    mae_source = max_source
+                else:
+                    mae_pct = _compute_pct(min_rate, entry_price, inverse=False)
+                    mae_source = min_source
+            if mfe_pct is None:
+                if is_short:
+                    mfe_pct = _compute_pct(min_rate, entry_price, inverse=True)
+                    mfe_source = min_source
+                else:
+                    mfe_pct = _compute_pct(max_rate, entry_price, inverse=False)
+                    mfe_source = max_source
+
+            if mae_pct is None and path_mae_pct is not None:
+                mae_pct = path_mae_pct
+                mae_source = "ohlcv_window"
+            if mfe_pct is None and path_mfe_pct is not None:
+                mfe_pct = path_mfe_pct
+                mfe_source = "ohlcv_window"
+
+            mae_pct, mfe_pct = _normalize_excursion(mae_pct, mfe_pct)
+            bmfe_pct = _normalize_bmfe(bmfe_pct)
+            if bmfe_pct is None and mfe_pct is not None:
+                # fallback：缺時序資料時，至少不再把 BMFE 視為負值。
+                bmfe_pct = _normalize_bmfe(mfe_pct)
+
+            if mdd_pct is None and mae_pct is not None:
+                # fallback：沒有完整路徑時，才以 MAE 近似。
+                mdd_pct = _normalize_mdd(mae_pct)
+                approximated_mdd = True
+
+            if bmfe_pct is not None and mfe_pct is not None:
+                bmfe_pct = min(float(bmfe_pct), float(mfe_pct))
+
             if mae_pct is None:
                 missing_mae_fields = True
                 mae_source = "missing"
@@ -428,12 +622,6 @@ def load_trades_json(
                 if max_fav_price is not None:
                     mfe_pct_with_costs = (max_fav_price * (1.0 - fee_close) - entry_cost) / entry_cost * 100.0
 
-        # BMFE/MDD 近似
-        bmfe_pct = mfe_pct
-        mdd_pct = mae_pct
-        if mdd_pct is None and mae_pct is not None:
-            mdd_pct = mae_pct
-            approximated_mdd = True
         if mdd_pct is None and mae_pct is None and (max_rate is None or min_rate is None):
             approximated_mdd = True
 
@@ -468,9 +656,9 @@ def load_trades_json(
                 "exit_price_source": exit_price_source,
                 "mae_source": mae_source if entry_price is not None else "missing",
                 "mfe_source": mfe_source if entry_price is not None else "missing",
-                "mae_time": None,
-                "gmfe_time": None,
-                "bmfe_time": None,
+                "mae_time": mae_time,
+                "gmfe_time": gmfe_time,
+                "bmfe_time": bmfe_time,
             }
         )
 
@@ -487,7 +675,7 @@ def load_trades_json(
     if missing_mfe_fields:
         chart_impacts["mfe"] = "缺少 max_rate 或 safe_price/open_rate，可能無法產生圖 4/5/6/8/9/10"
     if approximated_mdd:
-        warn_list.append("mdd_pct 以 MAE 近似，序列時序未提供。")
+        warn_list.append("mdd_pct 無法由 OHLCV 路徑計算，已以 MAE 近似。")
     if fee_missing:
         warn_list.append("未提供手續費或為 0，已以未含成本計算 MAE/MFE（with_costs 欄位可能為 None）。")
     if rebuilt_min_count or rebuilt_max_count:

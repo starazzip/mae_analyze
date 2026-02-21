@@ -177,6 +177,143 @@ def test_load_trades_json_marks_missing_when_no_ohlcv(tmp_path: Path) -> None:
     assert any("缺少 min_rate" in msg for msg in warnings)
 
 
+def test_load_trades_json_bmfe_is_before_mae_not_gmfe(tmp_path: Path) -> None:
+    data_dir = tmp_path / "spot_data"
+    _write_ohlcv_feather(
+        data_dir,
+        "BMFE/USDT",
+        "5m",
+        [
+            {"date": "2023-01-01 00:00:00+00:00", "open": 100.0, "high": 120.0, "low": 100.0, "close": 120.0},
+            {"date": "2023-01-01 00:05:00+00:00", "open": 120.0, "high": 115.0, "low": 90.0, "close": 90.0},
+            {"date": "2023-01-01 00:10:00+00:00", "open": 90.0, "high": 130.0, "low": 95.0, "close": 125.0},
+        ],
+    )
+    trades = [
+        {
+            "pair": "BMFE/USDT",
+            "trade_id": 4,
+            "is_short": False,
+            "is_open": False,
+            "open_date": "2023-01-01 00:00:00+00:00",
+            "close_date": "2023-01-01 00:10:00+00:00",
+            "open_rate": 100.0,
+            "close_rate": 125.0,
+            "min_rate": 90.0,
+            "max_rate": 130.0,
+            "fee_open": 0.0,
+            "fee_close": 0.0,
+            "orders": [],
+            "trade_duration": 10,
+            "exit_reason": "exit_signal",
+        }
+    ]
+    json_path = _write_backtest_json(tmp_path, trades)
+    df, _ = load_trades_json(
+        json_path,
+        STRATEGY,
+        data_dir=data_dir,
+        ohlcv_format="feather",
+        rebuild_excursions_from_ohlcv=True,
+    )
+
+    row = df.iloc[0]
+    assert row["mfe_pct"] == pytest_approx(30.0)
+    assert row["bmfe_pct"] == pytest_approx(20.0)
+    assert row["bmfe_pct"] < row["mfe_pct"]
+
+
+def test_load_trades_json_bmfe_can_equal_gmfe(tmp_path: Path) -> None:
+    data_dir = tmp_path / "spot_data"
+    _write_ohlcv_feather(
+        data_dir,
+        "BMFE_EQ/USDT",
+        "5m",
+        [
+            {"date": "2023-01-01 00:00:00+00:00", "open": 100.0, "high": 130.0, "low": 110.0, "close": 125.0},
+            {"date": "2023-01-01 00:05:00+00:00", "open": 125.0, "high": 120.0, "low": 90.0, "close": 95.0},
+        ],
+    )
+    trades = [
+        {
+            "pair": "BMFE_EQ/USDT",
+            "trade_id": 41,
+            "is_short": False,
+            "is_open": False,
+            "open_date": "2023-01-01 00:00:00+00:00",
+            "close_date": "2023-01-01 00:05:00+00:00",
+            "open_rate": 100.0,
+            "close_rate": 95.0,
+            "min_rate": 90.0,
+            "max_rate": 130.0,
+            "fee_open": 0.0,
+            "fee_close": 0.0,
+            "orders": [],
+            "trade_duration": 5,
+            "exit_reason": "stop_loss",
+        }
+    ]
+    json_path = _write_backtest_json(tmp_path, trades)
+    df, _ = load_trades_json(
+        json_path,
+        STRATEGY,
+        data_dir=data_dir,
+        ohlcv_format="feather",
+        rebuild_excursions_from_ohlcv=True,
+    )
+
+    row = df.iloc[0]
+    assert row["mfe_pct"] == pytest_approx(30.0)
+    assert row["bmfe_pct"] == pytest_approx(30.0)
+    assert row["bmfe_pct"] == row["mfe_pct"]
+
+
+def test_load_trades_json_mdd_uses_path_drawdown_not_mae(tmp_path: Path) -> None:
+    data_dir = tmp_path / "spot_data"
+    _write_ohlcv_feather(
+        data_dir,
+        "MDD/USDT",
+        "5m",
+        [
+            {"date": "2023-01-01 00:00:00+00:00", "open": 100.0, "high": 120.0, "low": 100.0, "close": 120.0},
+            {"date": "2023-01-01 00:05:00+00:00", "open": 120.0, "high": 115.0, "low": 90.0, "close": 90.0},
+            {"date": "2023-01-01 00:10:00+00:00", "open": 90.0, "high": 130.0, "low": 95.0, "close": 125.0},
+        ],
+    )
+    trades = [
+        {
+            "pair": "MDD/USDT",
+            "trade_id": 5,
+            "is_short": False,
+            "is_open": False,
+            "open_date": "2023-01-01 00:00:00+00:00",
+            "close_date": "2023-01-01 00:10:00+00:00",
+            "open_rate": 100.0,
+            "close_rate": 125.0,
+            "min_rate": 90.0,
+            "max_rate": 130.0,
+            "fee_open": 0.0,
+            "fee_close": 0.0,
+            "orders": [],
+            "trade_duration": 10,
+            "exit_reason": "exit_signal",
+        }
+    ]
+    json_path = _write_backtest_json(tmp_path, trades)
+    df, _ = load_trades_json(
+        json_path,
+        STRATEGY,
+        data_dir=data_dir,
+        ohlcv_format="feather",
+        rebuild_excursions_from_ohlcv=True,
+    )
+
+    row = df.iloc[0]
+    assert row["mae_pct"] == pytest_approx(-10.0)
+    assert row["mdd_pct"] == pytest_approx(-26.9230769231)
+    assert row["mdd_pct"] < row["mae_pct"]
+
+
 def pytest_approx(value: float):
     # 避免在測試內直接依賴全域 pytest import，降低誤報錯訊。
     import pytest
